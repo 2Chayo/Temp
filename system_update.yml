@@ -1,0 +1,25 @@
+---
+- name: Configure DNS and Upgrade Packages
+  hosts: all
+  become: true  # เทียบเท่าการใช้ sudo (ต้องมีสิทธิ์ sudo บนเครื่องปลายทาง)
+  gather_facts: false
+
+  tasks:
+    - name: Set DNS nameserver 1.1.1.1
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf
+        content: "nameserver 1.1.1.1\n"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Run apt update and dist-upgrade
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+        cache_valid_time: 0
+
+    - name: Run apt autoremove and clean
+      ansible.builtin.apt:
+        autoremove: true
+        clean: true
