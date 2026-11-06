@@ -1,8 +1,10 @@
 ---
 - name: Configure DNS and Upgrade Packages
   hosts: all
-  become: yes  # ใช้สิทธิ์ sudo บนเครื่องปลายทางอย่างถูกต้อง
-  gather_facts: true  # แนะนำให้เปิดไว้ เพื่อความสมบูรณ์ในการเก็บข้อมูลระบบ
+  become: yes
+  become_method: sudo
+  become_user: ansible
+  gather_facts: true
 
   tasks:
     - name: Run apt update and dist-upgrade
