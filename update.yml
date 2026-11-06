@@ -1,8 +1,8 @@
 ---
 - name: Configure DNS and Upgrade Packages
   hosts: all
-  become: yes  # เทียบเท่าการใช้ sudo (ต้องมีสิทธิ์ sudo บนเครื่องปลายทาง)
-  gather_facts: false
+  become: yes  # ใช้สิทธิ์ sudo บนเครื่องปลายทางอย่างถูกต้อง
+  gather_facts: true  # แนะนำให้เปิดไว้ เพื่อความสมบูรณ์ในการเก็บข้อมูลระบบ
 
   tasks:
     - name: Run apt update and dist-upgrade
