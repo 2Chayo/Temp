@@ -1,7 +1,7 @@
 ---
 - name: Configure DNS and Upgrade Packages
   hosts: all
-  become: true  # เทียบเท่าการใช้ sudo (ต้องมีสิทธิ์ sudo บนเครื่องปลายทาง)
+  become: yes  # เทียบเท่าการใช้ sudo (ต้องมีสิทธิ์ sudo บนเครื่องปลายทาง)
   gather_facts: false
 
   tasks:
