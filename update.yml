@@ -12,6 +12,12 @@
         update_cache: true
         upgrade: dist
         cache_valid_time: 0
+      register: apt_output  # 1. บันทึกผลลัพธ์ของ apt เก็บไว้ในตัวแปรนี้
+
+    - name: Show upgraded packages
+      ansible.builtin.debug:
+        msg: "{{ apt_output.stdout_lines }}"  # 2. สั่งแสดงผลรายชื่อที่อัปเกรดออกหน้าจอ Log
+      when: apt_output.changed  # จะแสดงผลเฉพาะเครื่องที่มีการเปลี่ยนแปลงจริง
 
     - name: Check if reboot is required
       ansible.builtin.stat:
