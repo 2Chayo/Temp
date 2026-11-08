@@ -5,11 +5,11 @@
   gather_facts: false
 
   tasks:
-    - name: Fetch failed password attempts from journalctl for today
+    - name: Fetch failed password attempts from journalctl
       ansible.builtin.shell: |
-        journalctl --since today --no-pager 2>/dev/null \
-          | grep -v "ansible" \
-          | grep "Failed password for " \
+        LC_ALL=C journalctl -u ssh* --since "24 hours ago" --no-pager 2>/dev/null \
+          | grep "Failed password" \
+          | grep -v "ansible-ansible" \
           | tail -n 100
       register: failed_ssh_logs
       changed_when: false
@@ -21,14 +21,14 @@
           {{
             failed_ssh_logs.stdout_lines
             if (failed_ssh_logs.stdout_lines | length > 0)
-            else ["Clean! No failed password attempts found today."]
+            else ["Clean! No failed password attempts found in the last 24 hours."]
           }}
 
-    - name: Summary Top Attacking IPs Today
+    - name: Summary Top Attacking IPs
       ansible.builtin.shell: |
-        journalctl --since today --no-pager 2>/dev/null \
-          | grep -v "ansible" \
-          | grep "Failed password for " \
+        LC_ALL=C journalctl -u ssh* --since "24 hours ago" --no-pager 2>/dev/null \
+          | grep "Failed password" \
+          | grep -v "ansible-ansible" \
           | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" \
           | awk '{print $2}' \
           | sort | uniq -c | sort -nr | head -n 5
@@ -42,5 +42,5 @@
           {{
             top_ips.stdout_lines
             if (top_ips.stdout_lines | length > 0)
-            else ["No attacks today"]
+            else ["No attacks found in the last 24 hours."]
           }}
