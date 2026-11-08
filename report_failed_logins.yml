@@ -7,9 +7,9 @@
   tasks:
     - name: Fetch failed password attempts from journalctl for today
       ansible.builtin.shell: |
-        journalctl _COMM=sshd --since today --no-pager 2>/dev/null \
-          | grep -iE "Failed|Invalid user|authentication failure" \
+        journalctl --since today --no-pager 2>/dev/null \
           | grep -v "ansible" \
+          | grep "Failed password for " \
           | tail -n 100
       register: failed_ssh_logs
       changed_when: false
@@ -26,11 +26,11 @@
 
     - name: Summary Top Attacking IPs Today
       ansible.builtin.shell: |
-        journalctl _COMM=sshd --since today --no-pager 2>/dev/null \
-          | grep -iE "Failed|Invalid user|authentication failure" \
+        journalctl --since today --no-pager 2>/dev/null \
           | grep -v "ansible" \
-          | grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}" \
-          | grep -v "127.0.0.1" \
+          | grep "Failed password for " \
+          | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" \
+          | awk '{print $2}' \
           | sort | uniq -c | sort -nr | head -n 5
       register: top_ips
       changed_when: false
