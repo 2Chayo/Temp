@@ -1,112 +1,23 @@
 
----
-- name: SSH Failed Login Report
-  hosts: all
-  become: true
-  gather_facts: true
+- name: Collect SSH failed login logs
+  ansible.builtin.shell: |
+    LC_ALL=C journalctl -u 'ssh*' \
+      --since "{{ ssh_log_period }}" \
+      --no-pager 2>/dev/null \
+      | grep -E 'sshd\[[0-9]+\]:.*Failed password' \
+      || true
+  register: ssh_failed_raw
+  changed_when: false
 
-  vars:
-    ssh_log_period: "24 hours ago"
-    report_dir: "./reports"
+- name: Count failed login events
+  ansible.builtin.set_fact:
+    failed_count: "{{ ssh_failed_raw.stdout_lines | length }}"
 
-  tasks:
-
-    - name: Collect SSH failed login logs
-      ansible.builtin.shell: |
-        journalctl -t sshd \
-          --since "{{ ssh_log_period }}" \
-          --no-pager \
-          -o short-iso 2>/dev/null \
-          | grep -E 'Failed password|authentication failure' \
-          || true
-      register: ssh_failed_raw
-      changed_when: false
-
-    - name: Count failed login events
-      ansible.builtin.set_fact:
-        failed_count: "{{ ssh_failed_raw.stdout_lines | length }}"
-
-    - name: Summarize failed login by source IP
-      ansible.builtin.shell: |
-        journalctl -t sshd \
-          --since "{{ ssh_log_period }}" \
-          --no-pager 2>/dev/null \
-          | grep -E 'Failed password|authentication failure' \
-          | awk '{
-              for (i=1; i<=NF; i++) {
-                if ($i == "from") print $(i+1);
-                else if ($i ~ /^rhost=/) {
-                  split($i,a,"=");
-                  if (a[2] != "" && a[2] != "?") print a[2];
-                }
-              }
-          }' \
-          | sort | uniq -c | sort -nr
-      register: ssh_ip_summary
-      changed_when: false
-
-    - name: Create report directory on controller
-      ansible.builtin.file:
-        path: "{{ report_dir }}"
-        state: directory
-        mode: '0755'
-      delegate_to: localhost
-      become: false
-      run_once: true
-
-    - name: Generate SSH report on controller
-      ansible.builtin.copy:
-        dest: "{{ report_dir }}/ssh_failed_login_{{ inventory_hostname }}_{{ ansible_date_time.date }}.txt"
-        mode: '0644'
-        content: |
-          ==========================================
-               SSH FAILED LOGIN SECURITY REPORT
-          ==========================================
-
-          Hostname    : {{ inventory_hostname }}
-          IP Address  : {{ ansible_host | default(inventory_hostname) }}
-          Generated   : {{ ansible_date_time.iso8601 }}
-          Period      : {{ ssh_log_period }}
-
-          ------------------------------------------
-          SUMMARY
-          ------------------------------------------
-
-          Total Failed Login : {{ failed_count }}
-
-          ------------------------------------------
-          SOURCE IP SUMMARY
-          ------------------------------------------
-
-          {% if ssh_ip_summary.stdout | trim | length > 0 %}
-          {{ ssh_ip_summary.stdout }}
-          {% else %}
-          No source IP found.
-          {% endif %}
-
-          ------------------------------------------
-          FAILED LOGIN DETAILS
-          ------------------------------------------
-
-          {% if failed_count | int > 0 %}
-          {% for line in ssh_failed_raw.stdout_lines %}
-          {{ line }}
-          {% endfor %}
-          {% else %}
-          No failed SSH login detected.
-          {% endif %}
-
-          ==========================================
-          END OF REPORT
-          ==========================================
-      delegate_to: localhost
-      become: false
-
-    - name: Display report summary
-      ansible.builtin.debug:
-        msg:
-          - "Host: {{ inventory_hostname }}"
-          - "Total Failed Login: {{ failed_count }}"
-          - "Source IP Summary:"
-          - "{{ ssh_ip_summary.stdout_lines }}"
-          - "Report: {{ report_dir }}/ssh_failed_login_{{ inventory_hostname }}_{{ ansible_date_time.date }}.txt"
+- name: Summarize failed login by source IP
+  ansible.builtin.shell: |
+    printf '%s\n' {{ ssh_failed_raw.stdout | quote }} \
+      | grep -oE 'from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
+      | awk '{print $2}' \
+      | sort | uniq -c | sort -nr
+  register: ssh_ip_summary
+  changed_when: false
