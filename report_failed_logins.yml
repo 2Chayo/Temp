@@ -1,0 +1,24 @@
+---
+- name: Report Today Failed SSH Logins (Last 100 lines)
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Fetch failed password attempts from journalctl for today
+      ansible.builtin.shell: |
+        journalctl -u ssh.service -u ssh.socket -u sshd.service --since today --no-pager 2>/dev/null \
+          | grep -iE "Failed password|authentication failure" \
+          | tail -n 100
+      register: failed_ssh_logs
+      changed_when: false
+      failed_when: false
+
+    - name: Display Failed Login Report
+      ansible.builtin.debug:
+        msg: >-
+          {{
+            failed_ssh_logs.stdout_lines
+            if (failed_ssh_logs.stdout_lines | length > 0)
+            else ["Clean! No failed password attempts found today."]
+          }}
