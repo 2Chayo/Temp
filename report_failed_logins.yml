@@ -22,3 +22,17 @@
             if (failed_ssh_logs.stdout_lines | length > 0)
             else ["Clean! No failed password attempts found today."]
           }}
+
+    - name: Summary Top Attacking IPs Today
+      ansible.builtin.shell: |
+        journalctl -u ssh.service -u ssh.socket -u sshd.service --since today --no-pager 2>/dev/null \
+          | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" \
+          | awk '{print $2}' \
+          | sort | uniq -c | sort -nr | head -n 5
+      register: top_ips
+      changed_when: false
+      failed_when: false
+
+    - name: Display Top Attacking IPs
+      ansible.builtin.debug:
+        msg: "{{ top_ips.stdout_lines if (top_ips.stdout_lines | length > 0) else ['No attacks today'] }}"
