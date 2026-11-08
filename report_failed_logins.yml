@@ -7,9 +7,7 @@
   tasks:
     - name: Fetch failed password attempts
       ansible.builtin.shell: |
-        LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager 2>/dev/null \
-          | awk '/sshd\[[0-9]+\]: Failed password for/ {print}' \
-          | tail -n 100
+        grep "Failed password" /var/log/auth.log 2>/dev/null | grep -v "python" | tail -n 100
       register: failed_ssh_logs
       changed_when: false
       failed_when: false
@@ -25,8 +23,9 @@
 
     - name: Summary Top Attacking IPs
       ansible.builtin.shell: |
-        LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager 2>/dev/null \
-          | awk '/sshd\[[0-9]+\]: Failed password for/ {for(i=1;i<=NF;i++) if($i=="from") print $(i+1)}' \
+        grep "Failed password" /var/log/auth.log 2>/dev/null | grep -v "python" \
+          | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" \
+          | awk '{print $2}' \
           | sort | uniq -c | sort -nr | head -n 5
       register: top_ips
       changed_when: false
