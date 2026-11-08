@@ -1,23 +1,42 @@
+---
+- name: SSH Failed Login Report
+  hosts: all
+  become: true
+  gather_facts: true
 
-- name: Collect SSH failed login logs
-  ansible.builtin.shell: |
-    LC_ALL=C journalctl -u 'ssh*' \
-      --since "{{ ssh_log_period }}" \
-      --no-pager 2>/dev/null \
-      | grep -E 'sshd\[[0-9]+\]:.*Failed password' \
-      || true
-  register: ssh_failed_raw
-  changed_when: false
+  vars:
+    ssh_log_period: "24 hours ago"
+    report_dir: "./reports"
 
-- name: Count failed login events
-  ansible.builtin.set_fact:
-    failed_count: "{{ ssh_failed_raw.stdout_lines | length }}"
+  tasks:
 
-- name: Summarize failed login by source IP
-  ansible.builtin.shell: |
-    printf '%s\n' {{ ssh_failed_raw.stdout | quote }} \
-      | grep -oE 'from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
-      | awk '{print $2}' \
-      | sort | uniq -c | sort -nr
-  register: ssh_ip_summary
-  changed_when: false
+    - name: Collect SSH failed login logs
+      ansible.builtin.shell: |
+        LC_ALL=C journalctl -u 'ssh*' \
+          --since "{{ ssh_log_period }}" \
+          --no-pager 2>/dev/null \
+          | grep -E 'sshd\[[0-9]+\]:.*Failed password' \
+          || true
+      register: ssh_failed_raw
+      changed_when: false
+
+    - name: Count failed login events
+      ansible.builtin.set_fact:
+        failed_count: "{{ ssh_failed_raw.stdout_lines | length }}"
+
+    - name: Summarize failed login by source IP
+      ansible.builtin.shell: |
+        printf '%s\n' {{ ssh_failed_raw.stdout | quote }} \
+          | grep -oE 'from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
+          | awk '{print $2}' \
+          | sort | uniq -c | sort -nr
+      register: ssh_ip_summary
+      changed_when: false
+
+    - name: Display report summary
+      ansible.builtin.debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Total Failed Login: {{ failed_count }}"
+          - "Source IP Summary:"
+          - "{{ ssh_ip_summary.stdout_lines }}"
