@@ -6,52 +6,31 @@
 
   tasks:
     - name: Fetch failed password attempts
-      ansible.builtin.shell: |
-        if [ -f /var/log/auth.log ]; then
-          grep "Failed password" /var/log/auth.log | grep "sshd\[" | tail -n 100
-        else
-          LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager 2>/dev/null \
-            | grep "Failed password" \
-            | grep "sshd\[" \
-            | tail -n 100
-        fi
+      ansible.builtin.shell: >
+        LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager
+        | grep "Failed password"
+        | grep "sshd"
+        | tail -n 100
       register: failed_ssh_logs
       changed_when: false
       failed_when: false
 
     - name: Display Failed Login Report
       ansible.builtin.debug:
-        msg: >-
-          {{
-            failed_ssh_logs.stdout_lines
-            if (failed_ssh_logs.stdout_lines | length > 0)
-            else ["Clean! No failed password attempts found in the last 24 hours."]
-          }}
+        msg: "{{ failed_ssh_logs.stdout_lines }}"
 
     - name: Summary Top Attacking IPs
-      ansible.builtin.shell: |
-        if [ -f /var/log/auth.log ]; then
-          grep "Failed password" /var/log/auth.log | grep "sshd\[" \
-            | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" \
-            | awk '{print $2}' \
-            | sort | uniq -c | sort -nr | head -n 5
-        else
-          LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager 2>/dev/null \
-            | grep "Failed password" \
-            | grep "sshd\[" \
-            | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" \
-            | awk '{print $2}' \
-            | sort | uniq -c | sort -nr | head -n 5
-        fi
+      ansible.builtin.shell: >
+        LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager
+        | grep "Failed password"
+        | grep "sshd"
+        | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
+        | awk '{print $2}'
+        | sort | uniq -c | sort -nr | head -n 5
       register: top_ips
       changed_when: false
       failed_when: false
 
     - name: Display Top Attacking IPs
       ansible.builtin.debug:
-        msg: >-
-          {{
-            top_ips.stdout_lines
-            if (top_ips.stdout_lines | length > 0)
-            else ["No attacks found in the last 24 hours."]
-          }}
+        msg: "{{ top_ips.stdout_lines }}"
