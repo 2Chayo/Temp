@@ -1,39 +1,60 @@
 
 ---
-- name: Diagnose SSH Failed Login
+- name: SSH Failed Login Report
   hosts: all
   become: true
-  gather_facts: false
+  gather_facts: true
+
+  vars:
+    ssh_log_period: "24 hours ago"
 
   tasks:
 
-    - name: Check current server time
-      ansible.builtin.command: date
-      register: server_time
-      changed_when: false
-
-    - name: Check journal access
-      ansible.builtin.command: journalctl --list-boots
-      register: journal_boots
-      changed_when: false
-
-    - name: Search SSH logs on November 8
+    - name: Collect SSH Failed Password Logs
       ansible.builtin.shell: |
-        LC_ALL=C journalctl -u 'ssh*' \
-          --since "2026-11-08 00:00:00" \
-          --until "2026-11-09 00:00:00" \
-          --no-pager
-      register: ssh_test
+        set -o pipefail
+
+        journalctl -q \
+          --since "{{ ssh_log_period }}" \
+          --no-pager \
+          -o short-iso 2>&1 \
+          | awk '/sshd\[[0-9]+\]: Failed password for /'
+      args:
+        executable: /bin/bash
+      register: ssh_failed_raw
       changed_when: false
 
-    - name: Display diagnostic result
+    - name: Count Failed Login
+      ansible.builtin.set_fact:
+        failed_count: "{{ ssh_failed_raw.stdout_lines | length }}"
+
+    - name: Summarize Source IP
+      ansible.builtin.shell: |
+        printf '%s\n' {{ ssh_failed_raw.stdout | quote }} \
+          | awk '{
+              for (i=1; i<=NF; i++)
+                if ($i == "from") print $(i+1)
+          }' \
+          | sort | uniq -c | sort -nr
+      register: ssh_ip_summary
+      changed_when: false
+
+    - name: Display SSH Security Report
       ansible.builtin.debug:
         msg:
-          - "Host: {{ inventory_hostname }}"
-          - "Server Time: {{ server_time.stdout }}"
-          - "Journal Boots: {{ journal_boots.stdout_lines }}"
-          - "Journal Exit Code: {{ ssh_test.rc }}"
-          - "Matching Failed Login:"
-          - "{{ ssh_test.stdout_lines | select('search', 'Failed password') | list }}"
-          - "Total: {{ ssh_test.stdout_lines | select('search', 'Failed password') | list | length }}"
-          - "Journal Error: {{ ssh_test.stderr }}"
+          - "===================================="
+          - "SSH FAILED LOGIN REPORT"
+          - "===================================="
+          - "Hostname: {{ inventory_hostname }}"
+          - "IP: {{ ansible_host | default(inventory_hostname) }}"
+          - "Generated: {{ ansible_date_time.iso8601 }}"
+          - "Period: {{ ssh_log_period }}"
+          - "Total Failed Login: {{ failed_count }}"
+          - "Source IP Summary:"
+          - "{{ ssh_ip_summary.stdout_lines }}"
+          - "===================================="
+
+    - name: Display Failed Login Details
+      ansible.builtin.debug:
+        var: ssh_failed_raw.stdout_lines
+      when: failed_count | int > 0
