@@ -6,31 +6,37 @@
 
   tasks:
     - name: Fetch failed password attempts
-      ansible.builtin.shell: >
-        LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager
-        | grep "Failed password"
-        | grep "sshd"
-        | tail -n 100
+      ansible.builtin.shell: |
+        LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager 2>/dev/null \
+          | awk '/sshd\[[0-9]+\]: Failed password for/ {print}' \
+          | tail -n 100
       register: failed_ssh_logs
       changed_when: false
       failed_when: false
 
     - name: Display Failed Login Report
       ansible.builtin.debug:
-        msg: "{{ failed_ssh_logs.stdout_lines }}"
+        msg: >-
+          {{
+            failed_ssh_logs.stdout_lines
+            if (failed_ssh_logs.stdout_lines | length > 0)
+            else ["Clean! No failed password attempts found in the last 24 hours."]
+          }}
 
     - name: Summary Top Attacking IPs
-      ansible.builtin.shell: >
-        LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager
-        | grep "Failed password"
-        | grep "sshd"
-        | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
-        | awk '{print $2}'
-        | sort | uniq -c | sort -nr | head -n 5
+      ansible.builtin.shell: |
+        LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager 2>/dev/null \
+          | awk '/sshd\[[0-9]+\]: Failed password for/ {for(i=1;i<=NF;i++) if($i=="from") print $(i+1)}' \
+          | sort | uniq -c | sort -nr | head -n 5
       register: top_ips
       changed_when: false
       failed_when: false
 
     - name: Display Top Attacking IPs
       ansible.builtin.debug:
-        msg: "{{ top_ips.stdout_lines }}"
+        msg: >-
+          {{
+            top_ips.stdout_lines
+            if (top_ips.stdout_lines | length > 0)
+            else ["No attacks found in the last 24 hours."]
+          }}
