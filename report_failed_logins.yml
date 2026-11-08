@@ -1,42 +1,39 @@
+
 ---
-- name: SSH Failed Login Report
+- name: Diagnose SSH Failed Login
   hosts: all
   become: true
-  gather_facts: true
-
-  vars:
-    ssh_log_period: "24 hours ago"
-    report_dir: "./reports"
+  gather_facts: false
 
   tasks:
 
-    - name: Collect SSH failed login logs
+    - name: Check current server time
+      ansible.builtin.command: date
+      register: server_time
+      changed_when: false
+
+    - name: Check journal access
+      ansible.builtin.command: journalctl --list-boots
+      register: journal_boots
+      changed_when: false
+
+    - name: Search SSH logs on November 8
       ansible.builtin.shell: |
         LC_ALL=C journalctl -u 'ssh*' \
-          --since "{{ ssh_log_period }}" \
-          --no-pager 2>/dev/null \
-          | grep -E 'sshd\[[0-9]+\]:.*Failed password' \
-          || true
-      register: ssh_failed_raw
+          --since "2026-11-08 00:00:00" \
+          --until "2026-11-09 00:00:00" \
+          --no-pager
+      register: ssh_test
       changed_when: false
 
-    - name: Count failed login events
-      ansible.builtin.set_fact:
-        failed_count: "{{ ssh_failed_raw.stdout_lines | length }}"
-
-    - name: Summarize failed login by source IP
-      ansible.builtin.shell: |
-        printf '%s\n' {{ ssh_failed_raw.stdout | quote }} \
-          | grep -oE 'from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
-          | awk '{print $2}' \
-          | sort | uniq -c | sort -nr
-      register: ssh_ip_summary
-      changed_when: false
-
-    - name: Display report summary
+    - name: Display diagnostic result
       ansible.builtin.debug:
         msg:
           - "Host: {{ inventory_hostname }}"
-          - "Total Failed Login: {{ failed_count }}"
-          - "Source IP Summary:"
-          - "{{ ssh_ip_summary.stdout_lines }}"
+          - "Server Time: {{ server_time.stdout }}"
+          - "Journal Boots: {{ journal_boots.stdout_lines }}"
+          - "Journal Exit Code: {{ ssh_test.rc }}"
+          - "Matching Failed Login:"
+          - "{{ ssh_test.stdout_lines | select('search', 'Failed password') | list }}"
+          - "Total: {{ ssh_test.stdout_lines | select('search', 'Failed password') | list | length }}"
+          - "Journal Error: {{ ssh_test.stderr }}"
