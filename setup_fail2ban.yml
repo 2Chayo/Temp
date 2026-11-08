@@ -1,0 +1,50 @@
+---
+- name: Universal Fail2ban Setup for Ubuntu and Debian
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install Fail2ban and python3-systemd on all OS
+      ansible.builtin.apt:
+        name:
+          - fail2ban
+          - python3-systemd
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Deploy Fail2ban jail.local configuration
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.local
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [DEFAULT]
+          # Whitelist ไม่แบน Localhost (IPv4/IPv6) และ Private Subnet 192.168.x.x
+          ignoreip = 127.0.0.1/8 ::1 192.168.0.0/16
+
+          # เงื่อนไข: ผิด 5 ครั้งใน 1 นาที (60s) แบน 5 นาที (300s)
+          findtime  = 60
+          maxretry  = 5
+          bantime   = 300
+
+          [sshd]
+          enabled = true
+          port    = ssh
+          mode    = normal
+          backend = systemd
+      notify: Restart fail2ban
+
+    - name: Ensure Fail2ban service is enabled and running
+      ansible.builtin.service:
+        name: fail2ban
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Restart fail2ban
+      ansible.builtin.service:
+        name: fail2ban
+        state: restarted
