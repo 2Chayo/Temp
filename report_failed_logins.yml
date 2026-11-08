@@ -5,12 +5,16 @@
   gather_facts: false
 
   tasks:
-    - name: Fetch failed password attempts from journalctl
+    - name: Fetch failed password attempts
       ansible.builtin.shell: |
-        LC_ALL=C journalctl -u ssh* --since "24 hours ago" --no-pager 2>/dev/null \
-          | grep "Failed password" \
-          | grep -v "ansible-ansible" \
-          | tail -n 100
+        if [ -f /var/log/auth.log ]; then
+          grep "Failed password" /var/log/auth.log | grep "sshd\[" | tail -n 100
+        else
+          LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager 2>/dev/null \
+            | grep "Failed password" \
+            | grep "sshd\[" \
+            | tail -n 100
+        fi
       register: failed_ssh_logs
       changed_when: false
       failed_when: false
@@ -26,12 +30,19 @@
 
     - name: Summary Top Attacking IPs
       ansible.builtin.shell: |
-        LC_ALL=C journalctl -u ssh* --since "24 hours ago" --no-pager 2>/dev/null \
-          | grep "Failed password" \
-          | grep -v "ansible-ansible" \
-          | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" \
-          | awk '{print $2}' \
-          | sort | uniq -c | sort -nr | head -n 5
+        if [ -f /var/log/auth.log ]; then
+          grep "Failed password" /var/log/auth.log | grep "sshd\[" \
+            | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" \
+            | awk '{print $2}' \
+            | sort | uniq -c | sort -nr | head -n 5
+        else
+          LC_ALL=C journalctl -u 'ssh*' --since "24 hours ago" --no-pager 2>/dev/null \
+            | grep "Failed password" \
+            | grep "sshd\[" \
+            | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" \
+            | awk '{print $2}' \
+            | sort | uniq -c | sort -nr | head -n 5
+        fi
       register: top_ips
       changed_when: false
       failed_when: false
