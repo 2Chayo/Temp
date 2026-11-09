@@ -9,7 +9,7 @@
 
   tasks:
 
-    - name: Collect SSH Failed Password Logs
+    - name: Collect SSH Failed Password Logs and Summarize IPs
       ansible.builtin.shell: |
         set -o pipefail
         journalctl -q \
@@ -23,12 +23,40 @@
       register: ssh_failed_raw
       changed_when: false
 
-    - name: Extract Source IPs and Count
+    - name: Count Failed Logins
       ansible.builtin.set_fact:
         failed_count: "{{ ssh_failed_raw.stdout_lines | length }}"
-        # ดึง IP จากแต่ละบรรทัดมาเก็บเป็น List
-        extracted_ips: "{{ ssh_failed_raw.stdout_lines | map('regex_search', 'from ([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)', '\\1') | flatten }}"
 
-    - name: Summarize Source IP frequency
-      ansible.builtin.set_fact:
-        ip_summary_dict: "{{ extracted_ips | community.general.groupby('item') | ... }}" # ใช้ Group หรือประมวลผลผ่าน Jinja2
+    - name: Summarize Source IP
+      ansible.builtin.shell: |
+        if [ -n "{{ ssh_failed_raw.stdout }}" ]; then
+          printf '%s\n' "{{ ssh_failed_raw.stdout }}" \
+            | grep -oE 'from [0-9.]+' | awk '{print $2}' \
+            | sort | uniq -c | sort -nr
+        else
+          echo "No failed logins"
+        fi
+      args:
+        executable: /bin/bash
+      register: ssh_ip_summary
+      changed_when: false
+
+    - name: Display SSH Security Report
+      ansible.builtin.debug:
+        msg:
+          - "===================================="
+          - "SSH FAILED LOGIN REPORT"
+          - "===================================="
+          - "Hostname: {{ inventory_hostname }}"
+          - "IP: {{ ansible_host | default(inventory_hostname) }}"
+          - "Generated: {{ ansible_facts['date_time']['iso8601'] }}"
+          - "Period: {{ ssh_log_period }}"
+          - "Total Failed Login: {{ failed_count }}"
+          - "Source IP Summary:"
+          - "{{ ssh_ip_summary.stdout_lines }}"
+          - "===================================="
+
+    - name: Display Failed Login Details
+      ansible.builtin.debug:
+        var: ssh_failed_raw.stdout_lines
+      when: failed_count | int > 0
