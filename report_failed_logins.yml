@@ -1,6 +1,11 @@
 ---
 # ตรวจสอบ SSH failed login ย้อนหลัง
 # Extra vars ที่ปรับได้: lookback_hours, alert_threshold, fail_on_threshold, top_n
+#
+# ค่าเริ่มต้นแสดงเฉพาะ "Report - failed logins per username" และ "Warn about suspicious IPs"
+# task ที่ติด tag [never, extra] จะไม่รัน (และไม่โผล่ใน log) จนกว่าจะเปิดด้วย
+#   --tags all,extra        (Semaphore: ใส่ใน CLI args / ช่อง Tags)
+# หรือลบบรรทัด "tags: [never, extra]" ออกจาก task ที่ต้องการเปิดถาวร
 
 - name: Check SSH failed logins
   hosts: all
@@ -99,6 +104,7 @@
              | map(attribute='key') | list }}
 
     - name: Diagnostics
+      tags: [never, extra]
       ansible.builtin.debug:
         msg: |
           Target hostname : {{ host_name.stdout }}  (inventory: {{ inventory_hostname }})
@@ -108,6 +114,7 @@
           journalctl stderr: {{ journal.stderr | default('') | truncate(300) }}
 
     - name: Report - failed logins per source IP
+      tags: [never, extra]
       ansible.builtin.debug:
         msg: |
           Host: {{ host_name.stdout }}  (last {{ lookback_hours }}h)
@@ -131,6 +138,7 @@
           {% endfor %}
 
     - name: Report - raw log lines
+      tags: [never, extra]
       ansible.builtin.debug:
         var: failed_lines
       when: failed_lines | length > 0
@@ -141,6 +149,7 @@
       when: suspicious_ips | length > 0
 
     - name: Fail task if threshold exceeded (optional)
+      tags: [never, extra]
       ansible.builtin.fail:
         msg: "Suspicious SSH activity from: {{ suspicious_ips | join(', ') }}"
       when:
