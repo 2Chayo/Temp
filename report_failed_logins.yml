@@ -16,7 +16,7 @@
           --since "{{ ssh_log_period }}" \
           --no-pager \
           -o short-iso 2>&1 \
-          | grep -v "ansible-" \
+          | grep -vE "ansible-|sudo:" \
           | awk '/(sshd|sshd-session)\[[0-9]+\]: Failed password for/'
       args:
         executable: /bin/bash
