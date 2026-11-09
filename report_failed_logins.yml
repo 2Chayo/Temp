@@ -1,4 +1,4 @@
-- name: SSH Failed Login Report
+- name: SSH Failed Login Report across Servers
   hosts: all
   become: true
   gather_facts: true
@@ -11,29 +11,28 @@
 
     - name: Get Failed Login Details
       ansible.builtin.shell: |
-        set -o pipefail
-        journalctl -u 'ssh*' --since "{{ ssh_log_period }}" --no-pager | grep "Failed password"
+        journalctl --since "{{ ssh_log_period }}" --no-pager 2>/dev/null \
+          | grep -v "ansible-" \
+          | grep "Failed password" || true
       args:
         executable: /bin/bash
       register: ssh_failed_raw
       changed_when: false
 
-    - name: Get Summary IP Count
-      ansible.builtin.shell: |
-        set -o pipefail
-        journalctl -u 'ssh*' --since "{{ ssh_log_period }}" --no-pager \
-          | grep "Failed password" \
-          | grep -oE 'from [0-9.]+' | awk '{print $2}' \
-          | sort | uniq -c | sort -nr
-      args:
-        executable: /bin/bash
-      register: ssh_ip_summary
-      changed_when: false
+    - name: Clean Log Lines
+      ansible.builtin.set_fact:
+        clean_logs: "{{ ssh_failed_raw.stdout_lines | reject('eq', '') | list }}"
 
-    - name: Display SSH Failed Login Details
-      ansible.builtin.debug:
-        var: ssh_failed_raw.stdout_lines
+    - name: Set Final Count
+      ansible.builtin.set_fact:
+        failed_count: "{{ clean_logs | length }}"
 
-    - name: Display IP Summary Report
+    - name: Display Failed Login Details
       ansible.builtin.debug:
-        var: ssh_ip_summary.stdout_lines
+        var: clean_logs
+      when: failed_count | int > 0
+
+    - name: Display No Failed Logins Message
+      ansible.builtin.debug:
+        msg: "No failed SSH logins found in the past 24 hours on {{ inventory_hostname }}"
+      when: failed_count | int == 0
