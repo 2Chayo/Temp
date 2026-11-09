@@ -1,23 +1,30 @@
 ---
-- name: Configure DNS and Upgrade Packages
+- name: Upgrade packages and reboot if required
   hosts: all
-  become: yes
-  become_method: sudo
-  become_user: root
-  gather_facts: true
+  become: true
+  gather_facts: false          # เปิดเป็น true ก็ต่อเมื่อมี task ที่ใช้ ansible_facts
+  serial: "{{ serial_batch | default(1) }}"   # ทีละกี่เครื่อง (override ได้ใน Extra vars)
+
+  vars:
+    auto_reboot: true          # false = อัปเกรดอย่างเดียว ไม่ reboot
+
+  environment:
+    DEBIAN_FRONTEND: noninteractive
 
   tasks:
     - name: Run apt update and dist-upgrade
       ansible.builtin.apt:
         update_cache: true
         upgrade: dist
-        cache_valid_time: 0
-      register: apt_output  # 1. บันทึกผลลัพธ์ของ apt เก็บไว้ในตัวแปรนี้
+        autoremove: true
+        lock_timeout: 120                        # รอ apt lock แทนที่จะ fail ทันที
+        dpkg_options: "force-confdef,force-confold"  # กัน prompt ถามเรื่อง config ค้าง
+      register: apt_output
 
-    - name: Show upgraded packages
+    - name: Show apt output
       ansible.builtin.debug:
-        msg: "{{ apt_output.stdout_lines }}"  # 2. สั่งแสดงผลรายชื่อที่อัปเกรดออกหน้าจอ Log
-      when: apt_output.changed  # จะแสดงผลเฉพาะเครื่องที่มีการเปลี่ยนแปลงจริง
+        msg: "{{ apt_output.stdout_lines | default([]) }}"
+      when: apt_output.changed
 
     - name: Check if reboot is required
       ansible.builtin.stat:
@@ -31,4 +38,6 @@
         reboot_timeout: 300
         pre_reboot_delay: 0
         post_reboot_delay: 30
-      when: reboot_required.stat.exists
+      when:
+        - auto_reboot | bool
+        - reboot_required.stat.exists
