@@ -9,37 +9,42 @@
 
   tasks:
 
-    - name: Collect SSH Failed Password Logs and Summarize IPs
+    - name: Collect and Summarize SSH Failed Logins
       ansible.builtin.shell: |
         set -o pipefail
-        journalctl -q \
-          --since "{{ ssh_log_period }}" \
-          --no-pager \
-          -o short-iso 2>&1 \
-          | grep -v "ansible-" \
-          | awk '/(sshd|sshd-session)\[[0-9]+\]: Failed password for/'
-      args:
-        executable: /bin/bash
-      register: ssh_failed_raw
-      changed_when: false
+        
+        # 1. ดึง Log ที่ไม่ใช่ของ ansible และตรงกับเงื่อนไข Failed password
+        LOGS=$(journalctl -q --since "{{ ssh_log_period }}" --no-pager -o short-iso 2>&1 \
+               | grep -v "ansible-" \
+               | awk '/(sshd|sshd-session)\[[0-9]+\]: Failed password for/')
 
-    - name: Count Failed Logins
-      ansible.builtin.set_fact:
-        failed_count: "{{ ssh_failed_raw.stdout_lines | length }}"
+        # 2. นับจำนวนทั้งหมด
+        COUNT=$(echo "$LOGS" | grep -c '.' || echo 0)
+        if [ -z "$LOGS" ]; then COUNT=0; fi
 
-    - name: Summarize Source IP
-      ansible.builtin.shell: |
-        if [ -n "{{ ssh_failed_raw.stdout }}" ]; then
-          printf '%s\n' "{{ ssh_failed_raw.stdout }}" \
-            | grep -oE 'from [0-9.]+' | awk '{print $2}' \
-            | sort | uniq -c | sort -nr
+        # 3. สรุปจำนวนแยกตาม IP
+        if [ "$COUNT" -gt 0 ]; then
+          SUMMARY=$(echo "$LOGS" | grep -oE 'from [0-9.]+' | awk '{print $2}' | sort | uniq -c | sort -nr)
         else
-          echo "No failed logins"
+          SUMMARY="No failed logins"
         fi
+
+        # ส่งออกผลลัพธ์ในรูปแบบที่อ่านง่าย (ขั้นด้วยเครื่องหมายพิเศษเพื่อให้ Ansible แยกส่วนได้)
+        echo "COUNT_RESULT=$COUNT"
+        echo "===IP_SUMMARY==="
+        echo "$SUMMARY"
+        echo "===LOG_DETAILS==="
+        echo "$LOGS"
       args:
         executable: /bin/bash
-      register: ssh_ip_summary
+      register: ssh_report_raw
       changed_when: false
+
+    - name: Parse Shell Output into Facts
+      ansible.builtin.set_fact:
+        failed_count: "{{ ssh_report_raw.stdout | regex_search('COUNT_RESULT=(.*)', '\\1') | first | trim }}"
+        ip_summary_lines: "{{ (ssh_report_raw.stdout | regex_search('===IP_SUMMARY===\\n([\\s\\S]*?)\\n===LOG_DETAILS===', '\\1')).split('\n') }}"
+        failed_details: "{{ (ssh_report_raw.stdout | regex_search('===LOG_DETAILS===\\n([\\s\\S]*)', '\\1')).split('\n') }}"
 
     - name: Display SSH Security Report
       ansible.builtin.debug:
@@ -53,10 +58,10 @@
           - "Period: {{ ssh_log_period }}"
           - "Total Failed Login: {{ failed_count }}"
           - "Source IP Summary:"
-          - "{{ ssh_ip_summary.stdout_lines }}"
+          - "{{ ip_summary_lines }}"
           - "===================================="
 
     - name: Display Failed Login Details
       ansible.builtin.debug:
-        var: ssh_failed_raw.stdout_lines
+        var: failed_details
       when: failed_count | int > 0
