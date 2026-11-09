@@ -1,45 +1,22 @@
----
-- name: Upgrade packages and reboot if required
+- name: Configure DNS and Upgrade Packages
   hosts: all
-  become: true
+  become: yes
   become_method: sudo
   become_user: root
-  gather_facts: false          # เปิดเป็น true ก็ต่อเมื่อมี task ที่ใช้ ansible_facts
-  serial: "{{ serial_batch | default(1) }}"   # ทีละกี่เครื่อง (override ได้ใน Extra vars)
-
-  vars:
-    auto_reboot: true          # false = อัปเกรดอย่างเดียว ไม่ reboot
-
-  environment:
-    DEBIAN_FRONTEND: noninteractive
+  gather_facts: true
 
   tasks:
-    - name: Check that privilege escalation works
-      ansible.builtin.command: id -u
-      register: uid
-      changed_when: false
-
-    - name: Stop early if not running as root
-      ansible.builtin.assert:
-        that: uid.stdout == '0'
-        fail_msg: >-
-          become is not effective (become_user={{ ansible_become_user | default('unset') }}).
-          Check the Sudo credentials / become settings of the Semaphore Inventory and template.
-        quiet: true
-
     - name: Run apt update and dist-upgrade
       ansible.builtin.apt:
         update_cache: true
         upgrade: dist
-        autoremove: true
-        lock_timeout: 120                        # รอ apt lock แทนที่จะ fail ทันที
-        dpkg_options: "force-confdef,force-confold"  # กัน prompt ถามเรื่อง config ค้าง
-      register: apt_output
+        cache_valid_time: 0
+      register: apt_output  # 1. บันทึกผลลัพธ์ของ apt เก็บไว้ในตัวแปรนี้
 
-    - name: Show apt output
+    - name: Show upgraded packages
       ansible.builtin.debug:
-        msg: "{{ apt_output.stdout_lines | default([]) }}"
-      when: apt_output.changed
+        msg: "{{ apt_output.stdout_lines }}"  # 2. สั่งแสดงผลรายชื่อที่อัปเกรดออกหน้าจอ Log
+      when: apt_output.changed  # จะแสดงผลเฉพาะเครื่องที่มีการเปลี่ยนแปลงจริง
 
     - name: Check if reboot is required
       ansible.builtin.stat:
@@ -53,6 +30,4 @@
         reboot_timeout: 300
         pre_reboot_delay: 0
         post_reboot_delay: 30
-      when:
-        - auto_reboot | bool
-        - reboot_required.stat.exists
+      when: reboot_required.stat.exists
