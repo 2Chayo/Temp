@@ -29,7 +29,6 @@
           SUMMARY="No failed logins"
         fi
 
-        # ส่งออกผลลัพธ์ในรูปแบบที่อ่านง่าย (ขั้นด้วยเครื่องหมายพิเศษเพื่อให้ Ansible แยกส่วนได้)
         echo "COUNT_RESULT=$COUNT"
         echo "===IP_SUMMARY==="
         echo "$SUMMARY"
@@ -43,8 +42,8 @@
     - name: Parse Shell Output into Facts
       ansible.builtin.set_fact:
         failed_count: "{{ ssh_report_raw.stdout | regex_search('COUNT_RESULT=(.*)', '\\1') | first | trim }}"
-        ip_summary_lines: "{{ (ssh_report_raw.stdout | regex_search('===IP_SUMMARY===\\n([\\s\\S]*?)\\n===LOG_DETAILS===', '\\1')).split('\n') }}"
-        failed_details: "{{ (ssh_report_raw.stdout | regex_search('===LOG_DETAILS===\\n([\\s\\S]*)', '\\1')).split('\n') }}"
+        ip_summary_lines: "{{ (ssh_report_raw.stdout | regex_search('===IP_SUMMARY===\\n([\\s\\S]*?)\\n===LOG_DETAILS===', '\\1') | default('No failed logins', true)).split('\n') }}"
+        failed_details: "{{ ssh_report_raw.stdout_lines[ssh_report_raw.stdout_lines.index('===LOG_DETAILS===') + 1:] if '===LOG_DETAILS===' in ssh_report_raw.stdout_lines else [] }}"
 
     - name: Display SSH Security Report
       ansible.builtin.debug:
