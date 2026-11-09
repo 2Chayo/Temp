@@ -41,8 +41,8 @@
 
     - name: Parse Shell Output into Facts
       ansible.builtin.set_fact:
-        failed_count: "{{ ssh_report_raw.stdout | regex_search('COUNT_RESULT=(.*)', '\\1') | first | trim }}"
-        ip_summary_lines: "{{ (ssh_report_raw.stdout | regex_search('===IP_SUMMARY===\\n([\\s\\S]*?)\\n===LOG_DETAILS===', '\\1') | default('No failed logins', true)).split('\n') }}"
+        failed_count: "{{ ssh_report_raw.stdout_lines | select('match', '^COUNT_RESULT=') | first | regex_replace('COUNT_RESULT=', '') | trim }}"
+        ip_summary_lines: "{{ ssh_report_raw.stdout_lines[ssh_report_raw.stdout_lines.index('===IP_SUMMARY===') + 1 : ssh_report_raw.stdout_lines.index('===LOG_DETAILS===')] }}"
         failed_details: "{{ ssh_report_raw.stdout_lines[ssh_report_raw.stdout_lines.index('===LOG_DETAILS===') + 1:] if '===LOG_DETAILS===' in ssh_report_raw.stdout_lines else [] }}"
 
     - name: Display SSH Security Report
