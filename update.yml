@@ -12,6 +12,19 @@
     DEBIAN_FRONTEND: noninteractive
 
   tasks:
+    - name: Check that privilege escalation works
+      ansible.builtin.command: id -u
+      register: uid
+      changed_when: false
+
+    - name: Stop early if not running as root
+      ansible.builtin.assert:
+        that: uid.stdout == '0'
+        fail_msg: >-
+          become is not effective (become_user={{ ansible_become_user | default('unset') }}).
+          Check the Sudo credentials / become settings of the Semaphore Inventory and template.
+        quiet: true
+
     - name: Run apt update and dist-upgrade
       ansible.builtin.apt:
         update_cache: true
