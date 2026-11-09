@@ -1,39 +1,107 @@
-- name: SSH Failed Login Report
+---
+# ตรวจสอบ SSH failed login ย้อนหลัง (เทียบเท่า journalctl | grep "Failed password" | uniq -c)
+# ใช้ใน Semaphore UI: Task Template -> App: Ansible Playbook
+# ตัวแปรที่ override ได้ผ่าน Environment (Extra variables):
+#   lookback_hours, alert_threshold, fail_on_threshold, top_n
+
+- name: Check SSH failed logins
   hosts: all
   become: true
-  gather_facts: true
+  gather_facts: false
 
   vars:
-    ssh_log_period: "24 hours ago"
-    ansible_python_interpreter: /usr/bin/python3
+    lookback_hours: 24        # ย้อนหลังกี่ชั่วโมง
+    alert_threshold: 10       # IP ใดล้มเหลวเกินค่านี้ถือว่าน่าสงสัย
+    fail_on_threshold: false  # true = ให้ task เป็นสีแดงใน Semaphore เมื่อเกิน threshold
+    top_n: 10                 # แสดง top IP / user กี่อันดับ
+    ssh_unit_pattern: 'ssh*'  # ตรงกับ -u 'ssh*' (ครอบคลุม ssh.service / sshd)
 
   tasks:
-
-    - name: Get Failed Login Details
+    - name: Collect "Failed password" lines from journal
       ansible.builtin.shell: |
         set -o pipefail
-        journalctl -u ssh --since "{{ ssh_log_period }}" --no-pager 2>/dev/null | grep "Failed password" || true
+        journalctl -u '{{ ssh_unit_pattern }}' --since "{{ lookback_hours }} hours ago" --no-pager \
+          | grep "Failed password" || true
       args:
         executable: /bin/bash
-      register: ssh_failed_raw
+      register: failed_raw
       changed_when: false
 
-    - name: Get Summary IP Count
-      ansible.builtin.shell: |
-        set -o pipefail
-        journalctl -u ssh --since "{{ ssh_log_period }}" --no-pager 2>/dev/null \
-          | grep "Failed password" \
-          | grep -oE 'from [0-9.]+' | awk '{print $2}' \
-          | sort | uniq -c | sort -nr || true
-      args:
-        executable: /bin/bash
-      register: ssh_ip_summary
-      changed_when: false
+    - name: Parse source IPs and usernames
+      ansible.builtin.set_fact:
+        failed_lines: "{{ failed_raw.stdout_lines }}"
+        failed_ips: >-
+          {{ failed_raw.stdout_lines
+             | map('regex_search', 'from ([0-9a-fA-F.:]+) port', '\1')
+             | select | map('first') | list }}
+        failed_users: >-
+          {{ failed_raw.stdout_lines
+             | map('regex_search', 'Failed password for (?:invalid user )?(\S+) from', '\1')
+             | select | map('first') | list }}
 
-    - name: Display SSH Failed Login Details
-      ansible.builtin.debug:
-        var: ssh_failed_raw.stdout_lines
+    - name: Count attempts per IP and per user
+      ansible.builtin.set_fact:
+        ip_counts: "{{ ip_json | from_json }}"
+        user_counts: "{{ user_json | from_json }}"
+      vars:
+        ip_json: >-
+          {%- set ns = namespace(d={}) -%}
+          {%- for ip in failed_ips -%}
+          {%- set _ = ns.d.update({ip: ns.d.get(ip, 0) + 1}) -%}
+          {%- endfor -%}
+          {{ ns.d | to_json }}
+        user_json: >-
+          {%- set ns = namespace(d={}) -%}
+          {%- for u in failed_users -%}
+          {%- set _ = ns.d.update({u: ns.d.get(u, 0) + 1}) -%}
+          {%- endfor -%}
+          {{ ns.d | to_json }}
 
-    - name: Display IP Summary Report
+    - name: Build sorted summary
+      ansible.builtin.set_fact:
+        top_ips: "{{ ip_counts | dict2items | sort(attribute='value', reverse=true) | list }}"
+        top_users: "{{ user_counts | dict2items | sort(attribute='value', reverse=true) | list }}"
+        suspicious_ips: >-
+          {{ ip_counts | dict2items
+             | selectattr('value', 'ge', alert_threshold | int)
+             | map(attribute='key') | list }}
+
+    - name: Report - failed logins per source IP
       ansible.builtin.debug:
-        var: ssh_ip_summary.stdout_lines
+        msg: |
+          Host: {{ inventory_hostname }}  (last {{ lookback_hours }}h)
+          Total failed attempts: {{ failed_lines | length }}
+
+          Per source IP (top {{ top_n }}):
+          {% for i in top_ips[:top_n | int] %}
+          {{ '%6d' | format(i.value) }}  {{ i.key }}
+          {% else %}
+          (none)
+          {% endfor %}
+
+    - name: Report - failed logins per username
+      ansible.builtin.debug:
+        msg: |
+          Per username (top {{ top_n }}):
+          {% for u in top_users[:top_n | int] %}
+          {{ '%6d' | format(u.value) }}  {{ u.key }}
+          {% else %}
+          (none)
+          {% endfor %}
+
+    - name: Report - raw log lines
+      ansible.builtin.debug:
+        var: failed_lines
+      when: failed_lines | length > 0
+
+    - name: Warn about suspicious IPs
+      ansible.builtin.debug:
+        msg: "WARNING: {{ suspicious_ips | join(', ') }} reached {{ alert_threshold }}+ failed attempts on {{ inventory_hostname }}"
+      when: suspicious_ips | length > 0
+
+    - name: Fail task if threshold exceeded (optional)
+      ansible.builtin.fail:
+        msg: "Suspicious SSH activity from: {{ suspicious_ips | join(', ') }}"
+      when:
+        - fail_on_threshold | bool
+        - suspicious_ips | length > 0
