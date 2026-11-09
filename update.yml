@@ -2,6 +2,8 @@
 - name: Upgrade packages and reboot if required
   hosts: all
   become: true
+  become_method: sudo
+  become_user: root
   gather_facts: false          # เปิดเป็น true ก็ต่อเมื่อมี task ที่ใช้ ansible_facts
   serial: "{{ serial_batch | default(1) }}"   # ทีละกี่เครื่อง (override ได้ใน Extra vars)
 
