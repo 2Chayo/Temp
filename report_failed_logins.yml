@@ -9,21 +9,27 @@
 
   tasks:
 
-    - name: Get Failed Login Details safely
+    - name: Get Clean Failed Login Details safely
       ansible.builtin.shell: |
-        journalctl --since "{{ ssh_log_period }}" --no-pager 2>/dev/null | grep "Failed password" || true
+        journalctl --since "{{ ssh_log_period }}" --no-pager 2>/dev/null \
+          | grep -vE "ansible-|sudo:" \
+          | grep "Failed password" || true
       args:
         executable: /bin/bash
       register: ssh_failed_raw
       changed_when: false
 
-    - name: Count Failed Logins
+    - name: Count Clean Failed Logins
       ansible.builtin.set_fact:
-        failed_count: "{{ ssh_failed_raw.stdout_lines | reject('eq', '') | length }}"
+        clean_logs: "{{ ssh_failed_raw.stdout_lines | reject('eq', '') | list }}"
 
-    - name: Display Failed Login Details (if any)
+    - name: Set Final Count
+      ansible.builtin.set_fact:
+        failed_count: "{{ clean_logs | length }}"
+
+    - name: Display Clean Failed Login Details (if any)
       ansible.builtin.debug:
-        var: ssh_failed_raw.stdout_lines
+        var: clean_logs
       when: failed_count | int > 0
 
     - name: Display No Failed Logins Message (if none)
