@@ -1,133 +1,18 @@
 ---
-# ตรวจสอบ SSH failed login ย้อนหลัง
-# Extra vars ที่ปรับได้: lookback_hours, alert_threshold, fail_on_threshold, top_n
-
-- name: Check SSH failed logins
-  hosts: all
+- hosts: all
   become: true
   gather_facts: false
-
-  vars:
-    lookback_hours: 24
-    alert_threshold: 10
-    fail_on_threshold: false
-    top_n: 10
-
   tasks:
-    - name: Identify target host
-      ansible.builtin.command: hostname
-      register: host_name
+    - name: Who am I
+      ansible.builtin.command: whoami
+      register: me
       changed_when: false
 
-    # ดึงด้วย identifier (ใช้ได้ทั้ง sshd / sshd-session / sshd-auth) ไม่ผูกกับชื่อ unit
-    - name: Read sshd entries from journal
-      ansible.builtin.shell: >-
-        journalctl --since "{{ lookback_hours }} hours ago" --no-pager
-        -t sshd -t sshd-session -t sshd-auth
-      register: journal
+    - name: Same command as manual
+      ansible.builtin.shell: journalctl -u 'ssh*' --since "24 hours ago" --no-pager | grep "Failed password"
+      register: r
       failed_when: false
       changed_when: false
 
-    - name: Filter failed password lines from journal
-      ansible.builtin.set_fact:
-        journal_lines: "{{ journal.stdout_lines | select('search', 'Failed password') | list }}"
-        journal_total: "{{ journal.stdout_lines | reject('match', '^-- ') | list | length }}"
-
-    # fallback: เครื่องที่ไม่ได้เก็บ journal หรือเขียน log เป็นไฟล์ (ไม่มีตัวกรองเวลา)
-    - name: Fallback - read auth log files
-      ansible.builtin.shell: grep -h "Failed password" /var/log/auth.log /var/log/secure 2>/dev/null || true
-      register: authlog
-      changed_when: false
-      when: journal_lines | length == 0
-
-    - name: Choose log source
-      ansible.builtin.set_fact:
-        failed_lines: "{{ journal_lines if (journal_lines | length > 0) else (authlog.stdout_lines | default([])) }}"
-        log_source: "{{ 'journal' if (journal_lines | length > 0) else ('auth log file (no time filter)' if (authlog.stdout_lines | default([]) | length > 0) else 'none found') }}"
-
-    - name: Parse source IPs and usernames
-      ansible.builtin.set_fact:
-        failed_ips: >-
-          {{ failed_lines
-             | map('regex_search', 'from ([0-9a-fA-F.:]+) port', '\1')
-             | select | map('first') | list }}
-        failed_users: >-
-          {{ failed_lines
-             | map('regex_search', 'Failed password for (?:invalid user )?(\S+) from', '\1')
-             | select | map('first') | list }}
-
-    - name: Count attempts per IP and per user
-      ansible.builtin.set_fact:
-        ip_counts: "{{ ip_json | from_json }}"
-        user_counts: "{{ user_json | from_json }}"
-      vars:
-        ip_json: >-
-          {%- set ns = namespace(d={}) -%}
-          {%- for ip in failed_ips -%}
-          {%- set _ = ns.d.update({ip: ns.d.get(ip, 0) + 1}) -%}
-          {%- endfor -%}
-          {{ ns.d | to_json }}
-        user_json: >-
-          {%- set ns = namespace(d={}) -%}
-          {%- for u in failed_users -%}
-          {%- set _ = ns.d.update({u: ns.d.get(u, 0) + 1}) -%}
-          {%- endfor -%}
-          {{ ns.d | to_json }}
-
-    - name: Build sorted summary
-      ansible.builtin.set_fact:
-        top_ips: "{{ ip_counts | dict2items | sort(attribute='value', reverse=true) | list }}"
-        top_users: "{{ user_counts | dict2items | sort(attribute='value', reverse=true) | list }}"
-        suspicious_ips: >-
-          {{ ip_counts | dict2items
-             | selectattr('value', 'ge', alert_threshold | int)
-             | map(attribute='key') | list }}
-
-    - name: Diagnostics
-      ansible.builtin.debug:
-        msg: |
-          Target hostname : {{ host_name.stdout }}  (inventory: {{ inventory_hostname }})
-          Log source      : {{ log_source }}
-          journalctl rc   : {{ journal.rc }}
-          sshd journal lines in last {{ lookback_hours }}h : {{ journal_total }}
-          journalctl stderr: {{ journal.stderr | default('') | truncate(300) }}
-
-    - name: Report - failed logins per source IP
-      ansible.builtin.debug:
-        msg: |
-          Host: {{ host_name.stdout }}  (last {{ lookback_hours }}h)
-          Total failed attempts: {{ failed_lines | length }}
-
-          Per source IP (top {{ top_n }}):
-          {% for i in top_ips[:top_n | int] %}
-          {{ '%6d' | format(i.value) }}  {{ i.key }}
-          {% else %}
-          (none)
-          {% endfor %}
-
-    - name: Report - failed logins per username
-      ansible.builtin.debug:
-        msg: |
-          Per username (top {{ top_n }}):
-          {% for u in top_users[:top_n | int] %}
-          {{ '%6d' | format(u.value) }}  {{ u.key }}
-          {% else %}
-          (none)
-          {% endfor %}
-
-    - name: Report - raw log lines
-      ansible.builtin.debug:
-        var: failed_lines
-      when: failed_lines | length > 0
-
-    - name: Warn about suspicious IPs
-      ansible.builtin.debug:
-        msg: "WARNING: {{ suspicious_ips | join(', ') }} reached {{ alert_threshold }}+ failed attempts on {{ host_name.stdout }}"
-      when: suspicious_ips | length > 0
-
-    - name: Fail task if threshold exceeded (optional)
-      ansible.builtin.fail:
-        msg: "Suspicious SSH activity from: {{ suspicious_ips | join(', ') }}"
-      when:
-        - fail_on_threshold | bool
-        - suspicious_ips | length > 0
+    - ansible.builtin.debug:
+        msg: "user={{ me.stdout }} rc={{ r.rc }} lines={{ r.stdout_lines | length }} stderr={{ r.stderr }}"
