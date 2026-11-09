@@ -9,58 +9,25 @@
 
   tasks:
 
-    - name: Collect and Summarize SSH Failed Logins
+    - name: Collect SSH Failed Login Details
       ansible.builtin.shell: |
         set -o pipefail
-        
-        # 1. ดึง Log ที่ไม่ใช่ของ ansible และตรงกับเงื่อนไข Failed password
-        LOGS=$(journalctl -q --since "{{ ssh_log_period }}" --no-pager -o short-iso 2>&1 \
-               | grep -v "ansible-" \
-               | awk '/(sshd|sshd-session)\[[0-9]+\]: Failed password for/')
-
-        # 2. นับจำนวนทั้งหมด
-        COUNT=$(echo "$LOGS" | grep -c '.' || echo 0)
-        if [ -z "$LOGS" ]; then COUNT=0; fi
-
-        # 3. สรุปจำนวนแยกตาม IP
-        if [ "$COUNT" -gt 0 ]; then
-          SUMMARY=$(echo "$LOGS" | grep -oE 'from [0-9.]+' | awk '{print $2}' | sort | uniq -c | sort -nr)
-        else
-          SUMMARY="No failed logins"
-        fi
-
-        echo "COUNT_RESULT=$COUNT"
-        echo "===IP_SUMMARY==="
-        echo "$SUMMARY"
-        echo "===LOG_DETAILS==="
-        echo "$LOGS"
+        journalctl -q \
+          --since "{{ ssh_log_period }}" \
+          --no-pager \
+          -o short-iso 2>&1 \
+          | grep -v "ansible-" \
+          | awk '/(sshd|sshd-session)\[[0-9]+\]: Failed password for/'
       args:
         executable: /bin/bash
-      register: ssh_report_raw
+      register: ssh_failed_raw
       changed_when: false
 
-    - name: Parse Shell Output into Facts
+    - name: Count Failed Logins
       ansible.builtin.set_fact:
-        failed_count: "{{ ssh_report_raw.stdout_lines | select('match', '^COUNT_RESULT=') | first | regex_replace('COUNT_RESULT=', '') | trim }}"
-        ip_summary_lines: "{{ ssh_report_raw.stdout_lines[ssh_report_raw.stdout_lines.index('===IP_SUMMARY===') + 1 : ssh_report_raw.stdout_lines.index('===LOG_DETAILS===')] }}"
-        failed_details: "{{ ssh_report_raw.stdout_lines[ssh_report_raw.stdout_lines.index('===LOG_DETAILS===') + 1:] if '===LOG_DETAILS===' in ssh_report_raw.stdout_lines else [] }}"
-
-    - name: Display SSH Security Report
-      ansible.builtin.debug:
-        msg:
-          - "===================================="
-          - "SSH FAILED LOGIN REPORT"
-          - "===================================="
-          - "Hostname: {{ inventory_hostname }}"
-          - "IP: {{ ansible_host | default(inventory_hostname) }}"
-          - "Generated: {{ ansible_facts['date_time']['iso8601'] }}"
-          - "Period: {{ ssh_log_period }}"
-          - "Total Failed Login: {{ failed_count }}"
-          - "Source IP Summary:"
-          - "{{ ip_summary_lines }}"
-          - "===================================="
+        failed_count: "{{ ssh_failed_raw.stdout_lines | length }}"
 
     - name: Display Failed Login Details
       ansible.builtin.debug:
-        var: failed_details
+        var: ssh_failed_raw.stdout_lines
       when: failed_count | int > 0
