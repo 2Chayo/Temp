@@ -12,7 +12,7 @@
     - name: Get Clean Failed Login Details safely
       ansible.builtin.shell: |
         journalctl --since "{{ ssh_log_period }}" --no-pager 2>/dev/null \
-          | grep -vE "ansible-|sudo:|journalctl" \
+          | grep -vE "ansible-" \
           | grep "Failed password" || true
       args:
         executable: /bin/bash
