@@ -1,0 +1,115 @@
+---
+- name: Comprehensive Web Stack Security Audit
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    # ---
+    # 1. ตรวจสอบ Nginx Hardening
+    # ---
+    - name: Check Nginx server_tokens and insecure permissions
+      ansible.builtin.shell: |
+        if command -v nginx >/dev/null 2>&1; then
+          tokens=$(nginx -T 2>/dev/null | grep -i "server_tokens" | head -n 1 | awk '{print $2}' | tr -d ';')
+          writable=$(find /etc/nginx -type f -perm -002 2>/dev/null | wc -l)
+          echo "TOKENS=${tokens:-on}|WRITABLE_FILES=${writable}"
+        else
+          echo "NOT_INSTALLED"
+        fi
+      register: nginx_audit
+      changed_when: false
+
+    # ---
+    # 2. ตรวจสอบ Apache Hardening
+    # ---
+    - name: Check Apache ServerTokens and Signature
+      ansible.builtin.shell: |
+        if command -v apache2 >/dev/null 2>&1; then
+          bin="apache2"
+        elif command -v httpd >/dev/null 2>&1; then
+          bin="httpd"
+        else
+          bin=""
+        fi
+
+        if [ -n "$bin" ]; then
+          tokens=$($bin -M 2>/dev/null; apachectl -S 2>/dev/null | grep -i "ServerTokens" | head -n 1)
+          writable=$(find /etc/apache2 /etc/httpd -type f -perm -002 2>/dev/null | wc -l)
+          echo "APACHE_ACTIVE|WRITABLE_FILES=${writable}"
+        else
+          echo "NOT_INSTALLED"
+        fi
+      register: apache_audit
+      changed_when: false
+
+    # ---
+    # 3. ตรวจสอบ PHP Hardening (disable_functions & display_errors)
+    # ---
+    - name: Check PHP critical security flags
+      ansible.builtin.shell: |
+        if command -v php >/dev/null 2>&1; then
+          disp_err=$(php -i 2>/dev/null | grep -E "^display_errors" | head -n 1 | awk '{print $3}')
+          dis_func=$(php -i 2>/dev/null | grep -E "^disable_functions" | head -n 1 | awk -F'=>' '{print $2}' | tr -d ' ')
+          
+          # เช็กว่ามี exec หรือ system อยู่ใน disable_functions หรือไม่
+          if echo "$dis_func" | grep -q "exec"; then
+            exec_blocked="YES"
+          else
+            exec_blocked="NO (WARNING)"
+          fi
+          
+          echo "DISPLAY_ERRORS=${disp_err:-Off}|EXEC_BLOCKED=${exec_blocked}"
+        else
+          echo "NOT_INSTALLED"
+        fi
+      register: php_audit
+      changed_when: false
+
+    # ---
+    # 4. ตรวจสอบ Node.js Processes (ห้ามรันด้วย Root)
+    # ---
+    - name: Check Node.js process execution user
+      ansible.builtin.shell: |
+        if pgrep -x "node" >/dev/null 2>&1; then
+          root_nodes=$(ps -eo user,comm | awk '$1=="root" && $2=="node"' | wc -l)
+          if [ "$root_nodes" -gt 0 ]; then
+            echo "ALERT: Node running as root ($root_nodes processes)"
+          else
+            echo "SAFE: Node running as non-root user"
+          fi
+        else
+          echo "NO_NODE_PROCESS_RUNNING"
+        fi
+      register: node_proc_audit
+      changed_when: false
+
+    # ---
+    # 5. ตรวจสอบไฟล์อันตราย (.env, .git) ที่เสี่ยงหลุดใน Web Root
+    # ---
+    - name: Scan web roots for exposed sensitive files (.git / .env)
+      ansible.builtin.shell: |
+        found=$(find /var/www /usr/share/nginx/html -maxdepth 3 \( -name ".git" -o -name ".env" \) 2>/dev/null)
+        if [ -n "$found" ]; then
+          echo "$found"
+        else
+          echo "CLEAN"
+        fi
+      register: webroot_leaks
+      changed_when: false
+
+    # ---
+    # 6. สรุปรายงานความปลอดภัยบนหน้าจอ Semaphore
+    # ---
+    - name: Display Comprehensive Security Audit Report
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "WEB SECURITY AUDIT REPORT: {{ inventory_hostname }}"
+          - "=========================================================="
+          - "Nginx Status          : {{ nginx_audit.stdout | trim }}"
+          - "Apache Status         : {{ apache_audit.stdout | trim }}"
+          - "PHP Configuration     : {{ php_audit.stdout | trim }}"
+          - "Node.js Process State : {{ node_proc_audit.stdout | trim }}"
+          - "Exposed Sensitive Data: {{ webroot_leaks.stdout_lines }}"
+          - "=========================================================="
