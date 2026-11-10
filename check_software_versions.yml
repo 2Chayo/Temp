@@ -1,8 +1,10 @@
 ---
 - name: Audit Web Stack Versions (Apache, PHP, Nginx, Node.js)
   hosts: all
-  become: true
-  gather_facts: false
+  become: yes
+  become_method: sudo
+  become_user: root
+  gather_facts: true
 
   tasks:
     # 1. ตรวจสอบ Nginx
