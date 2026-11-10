@@ -1,0 +1,51 @@
+---
+- name: Audit Web Service Security Baseline
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    # 1. เช็กว่ามี Service สำคัญ (DB/Redis) เผลอเปิด Listen สู่สาธารณะ (0.0.0.0) หรือไม่
+    - name: Check insecure public listening ports (DB/Cache)
+      ansible.builtin.shell: |
+        ss -tuln | awk '$5 ~ /^0\.0\.0\.0:(3306|5432|6379|27017|9200)/ {print $5}'
+      register: exposed_db_ports
+      changed_when: false
+
+    # 2. เช็กสถานะ Firewall (UFW หรือ iptables)
+    - name: Check Firewall status
+      ansible.builtin.shell: |
+        if command -v ufw >/dev/null 2>&1; then
+          ufw status | head -n 1
+        else
+          echo "UFW not installed"
+        fi
+      register: firewall_status
+      changed_when: false
+
+    # 3. เช็กว่า Node.js รันเป็น Root หรือไม่
+    - name: Check if Node.js is running as root
+      ansible.builtin.shell: |
+        ps -eo user,comm | awk '$1=="root" && $2=="node" {print "RUNNING_AS_ROOT"}' | head -n 1
+      register: node_root_check
+      changed_when: false
+
+    # 4. เช็กว่ามีไฟล์ .env หรือ .git เผลอเปิดสิทธิ์หลวมเกินไปใน /var/www หรือไม่
+    - name: Check sensitive file permissions in /var/www
+      ansible.builtin.shell: |
+        find /var/www -maxdepth 3 \( -name ".env" -o -name ".git" \) 2>/dev/null | head -n 5
+      register: sensitive_files
+      changed_when: false
+
+    # 5. สรุปผลรายงานความปลอดภัย
+    - name: Display Web Security Audit Summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Security Audit: {{ inventory_hostname }}"
+          - "=========================================="
+          - "Firewall Status      : {{ firewall_status.stdout | trim }}"
+          - "Exposed DB/Cache Ports: {{ exposed_db_ports.stdout_lines if (exposed_db_ports.stdout_lines | length > 0) else 'SAFE (None exposed)' }}"
+          - "Node.js running as Root: {{ 'WARNING: Running as root' if node_root_check.stdout == 'RUNNING_AS_ROOT' else 'SAFE / Not running' }}"
+          - "Sensitive Files Found : {{ sensitive_files.stdout_lines if (sensitive_files.stdout_lines | length > 0) else 'SAFE (None found)' }}"
+          - "=========================================="
