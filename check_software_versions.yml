@@ -1,0 +1,65 @@
+---
+- name: Audit Web Stack Versions (Apache, PHP, Nginx, Node.js)
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    # 1. ตรวจสอบ Nginx
+    - name: Check Nginx version
+      ansible.builtin.shell: |
+        if command -v nginx >/dev/null 2>&1; then
+          nginx -v 2>&1 | awk -F'/' '{print $2}'
+        else
+          echo "Not Installed"
+        fi
+      register: nginx_check
+      changed_when: false
+
+    # 2. ตรวจสอบ Apache (รองรับทั้ง apache2 ของ Debian/Ubuntu และ httpd ของ RHEL/CentOS)
+    - name: Check Apache version
+      ansible.builtin.shell: |
+        if command -v apache2 >/dev/null 2>&1; then
+          apache2 -v | head -n 1 | awk -F'/' '{print $2}' | awk '{print $1}'
+        elif command -v httpd >/dev/null 2>&1; then
+          httpd -v | head -n 1 | awk -F'/' '{print $2}' | awk '{print $1}'
+        else
+          echo "Not Installed"
+        fi
+      register: apache_check
+      changed_when: false
+
+    # 3. ตรวจสอบ PHP
+    - name: Check PHP version
+      ansible.builtin.shell: |
+        if command -v php >/dev/null 2>&1; then
+          php -r 'echo PHP_VERSION;' 2>/dev/null || php -v | head -n 1 | awk '{print $2}'
+        else
+          echo "Not Installed"
+        fi
+      register: php_check
+      changed_when: false
+
+    # 4. ตรวจสอบ Node.js
+    - name: Check Node.js version
+      ansible.builtin.shell: |
+        if command -v node >/dev/null 2>&1; then
+          node -v | sed 's/^v//'
+        else
+          echo "Not Installed"
+        fi
+      register: node_check
+      changed_when: false
+
+    # 5. แสดงผลสรุปรายเครื่อง
+    - name: Display Software Stack Audit
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Host: {{ inventory_hostname }}"
+          - "=========================================="
+          - "Nginx   : {{ nginx_check.stdout | trim }}"
+          - "Apache  : {{ apache_check.stdout | trim }}"
+          - "PHP     : {{ php_check.stdout | trim }}"
+          - "Node.js : {{ node_check.stdout | trim }}"
+          - "=========================================="
