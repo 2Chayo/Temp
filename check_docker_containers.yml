@@ -1,0 +1,44 @@
+---
+- name: Audit Running Docker Containers and Applications
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    # 1. ตรวจสอบว่ามี Docker และ Daemon กำลังทำงานอยู่หรือไม่
+    - name: Check Docker installation and service status
+      ansible.builtin.shell: |
+        if command -v docker >/dev/null 2>&1; then
+          if docker info >/dev/null 2>&1; then
+            echo "RUNNING"
+          else
+            echo "DAEMON_STOPPED"
+          fi
+        else
+          echo "NOT_INSTALLED"
+        fi
+      register: docker_state
+      changed_when: false
+
+    # 2. ดึงรายการ Docker Container ที่กำลังรันอยู่ (จัดรูปแบบเป็นตาราง)
+    - name: Inspect running Docker containers
+      ansible.builtin.shell: |
+        docker ps --format "table {% raw %}{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}{% endraw %}"
+      register: docker_ps_output
+      changed_when: false
+      when: docker_state.stdout == "RUNNING"
+
+    # 3. แสดงรายงานผลลัพธ์แยกรายเครื่องบนหน้าจอ Semaphore UI
+    - name: Display Docker Report
+      ansible.builtin.debug:
+        msg: >-
+          {{
+            ['Docker is NOT INSTALLED on this host.'] if docker_state.stdout == 'NOT_INSTALLED'
+            else (
+              ['Docker daemon is STOPPED / INACTIVE.'] if docker_state.stdout == 'DAEMON_STOPPED'
+              else (
+                ['Docker is running, but NO CONTAINERS ARE ACTIVE.'] if (docker_ps_output.stdout_lines | length <= 1)
+                else docker_ps_output.stdout_lines
+              )
+            )
+          }}
