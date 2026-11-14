@@ -1,5 +1,5 @@
 ---
-- name: Audit Web Stack Versions (Apache, PHP, Nginx, Node.js)
+- name: Audit Web Stack Versions (Apache, PHP, Nginx, Node.js, PostgreSQL)
   hosts: all
   become: yes
   become_method: sudo
@@ -53,15 +53,27 @@
       register: node_check
       changed_when: false
 
-    # 5. แสดงผลสรุปรายเครื่อง
+    # 5. ตรวจสอบ PostgreSQL
+    - name: Check PostgreSQL version
+      ansible.builtin.shell: |
+        if command -v psql >/dev/null 2>&1; then
+          psql --version | awk '{print $NF}'
+        else
+          echo "Not Installed"
+        fi
+      register: postgresql_check
+      changed_when: false
+
+    # 6. แสดงผลสรุปรายเครื่อง
     - name: Display Software Stack Audit
       ansible.builtin.debug:
         msg:
           - "=========================================="
           - "Host: {{ inventory_hostname }}"
           - "=========================================="
-          - "Nginx   : {{ nginx_check.stdout | trim }}"
-          - "Apache  : {{ apache_check.stdout | trim }}"
-          - "PHP     : {{ php_check.stdout | trim }}"
-          - "Node.js : {{ node_check.stdout | trim }}"
+          - "Nginx       : {{ nginx_check.stdout | trim }}"
+          - "Apache      : {{ apache_check.stdout | trim }}"
+          - "PHP         : {{ php_check.stdout | trim }}"
+          - "Node.js     : {{ node_check.stdout | trim }}"
+          - "PostgreSQL  : {{ postgresql_check.stdout | trim }}"
           - "=========================================="
